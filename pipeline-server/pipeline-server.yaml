@@ -1,0 +1,39 @@
+apiVersion: datasciencepipelinesapplications.opendatahub.io/v1
+kind: DataSciencePipelinesApplication
+metadata:
+  name: dspa
+spec:
+  dspVersion: v2
+
+  apiServer:
+    deploy: true
+    enableOauth: true
+    enableSamplePipeline: false
+
+  database:
+    mariaDB:
+      deploy: true
+      pipelineDBName: mlpipeline
+      pvcSize: 10Gi
+      username: mlpipeline
+
+  objectStorage:
+    externalStorage:
+      basePath: ""
+      bucket: ocr-pipeline-2874ad69-b628-42ce-9ed1-00618fe7d112
+      host: s3.openshift-storage.svc
+      port: "80"
+      scheme: http
+      region: "us-east-1"
+      s3CredentialsSecret:
+        secretName: ocr-pipeline-bucket
+        accessKey: AWS_ACCESS_KEY_ID
+        secretKey: AWS_SECRET_ACCESS_KEY
+
+  persistenceAgent:
+    deploy: true
+    numWorkers: 2
+
+  scheduledWorkflow:
+    deploy: true
+    cronScheduleTimezone: UTC

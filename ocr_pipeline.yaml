@@ -1,0 +1,175 @@
+# PIPELINE DEFINITION
+# Name: tfm-ocr-chars-pipeline
+# Description: Pipeline OCR (datos -> train -> validate -> deploy) - placeholders
+components:
+  comp-datos:
+    executorLabel: exec-datos
+  comp-deploy:
+    executorLabel: exec-deploy
+  comp-train:
+    executorLabel: exec-train
+  comp-validate:
+    executorLabel: exec-validate
+deploymentSpec:
+  executors:
+    exec-datos:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - datos
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef datos():\n    import os\n    print(\"[DATOS] Hola desde Kubeflow\
+          \ / OpenShift AI\")\n    print(\"[DATOS] NB_PREFIX =\", os.environ.get(\"\
+          NB_PREFIX\"))\n    print(\"[DATOS] KUBERNETES_SERVICE_HOST =\", os.environ.get(\"\
+          KUBERNETES_SERVICE_HOST\"))\n    print(\"[DATOS] Done\")\n\n"
+        image: registry.access.redhat.com/ubi9/python-311
+    exec-deploy:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - deploy
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef deploy():\n    print(\"[DEPLOY] Deploy placeholder\")\n    print(\"\
+          [DEPLOY] Done\")\n\n"
+        image: registry.access.redhat.com/ubi9/python-311
+    exec-train:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train():\n    import os\n    print(\"[TRAIN] Entrenamiento placeholder\"\
+          )\n    print(\"[TRAIN] PYTHON_VERSION =\", os.environ.get(\"PYTHON_VERSION\"\
+          ))\n    print(\"[TRAIN] Done\")\n\n"
+        image: registry.access.redhat.com/ubi9/python-311
+    exec-validate:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - validate
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef validate():\n    print(\"[VALIDATE] Validaci\xF3n placeholder\"\
+          )\n    print(\"[VALIDATE] Done\")\n\n"
+        image: registry.access.redhat.com/ubi9/python-311
+pipelineInfo:
+  description: Pipeline OCR (datos -> train -> validate -> deploy) - placeholders
+  name: tfm-ocr-chars-pipeline
+root:
+  dag:
+    tasks:
+      datos:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-datos
+        taskInfo:
+          name: datos
+      deploy:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-deploy
+        dependentTasks:
+        - validate
+        taskInfo:
+          name: deploy
+      train:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train
+        dependentTasks:
+        - datos
+        taskInfo:
+          name: train
+      validate:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-validate
+        dependentTasks:
+        - train
+        taskInfo:
+          name: validate
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.15.2
