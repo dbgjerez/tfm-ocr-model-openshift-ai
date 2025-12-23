@@ -1,32 +1,279 @@
 # PIPELINE DEFINITION
-# Name: tfm-ocr-chars-pipeline
-# Description: Pipeline OCR (datos -> train -> validate -> deploy) - placeholders
+# Name: tfm-ocr-chars
+# Inputs:
+#    branch: str [Default: 'main']
+#    dataset_rel_dir: str [Default: 'data/english/fnt']
+#    isvc_name: str [Default: 'ocr-rest']
+#    min_accuracy: float [Default: 0.9]
+#    namespace: str [Default: '']
+#    repo_url: str [Default: 'https://github.com/dbgjerez/tfm-ocr-model-openshift-ai.git']
+#    runtime_name: str [Default: 'ocr-rest-runtime']
+#    s3_bucket: str [Default: '']
+#    s3_endpoint: str [Default: '']
+#    s3_prefix: str [Default: 'models/ocr-rest/latest']
+#    s3_region: str [Default: 'us-east-1']
+#    service_account: str [Default: 'default']
+#    storage_secret_name: str [Default: 'ocr-s3-creds']
 components:
-  comp-datos:
-    executorLabel: exec-datos
-  comp-deploy:
-    executorLabel: exec-deploy
-  comp-train:
-    executorLabel: exec-train
-  comp-validate:
-    executorLabel: exec-validate
+  comp-condition-1:
+    dag:
+      tasks:
+        deploy-component:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-deploy-component
+          dependentTasks:
+          - upload-model-to-s3-component
+          inputs:
+            parameters:
+              isvc_name:
+                componentInputParameter: pipelinechannel--isvc_name
+              model_s3_uri:
+                taskOutputParameter:
+                  outputParameterKey: model_s3_uri
+                  producerTask: upload-model-to-s3-component
+              namespace:
+                componentInputParameter: pipelinechannel--namespace
+              runtime_name:
+                componentInputParameter: pipelinechannel--runtime_name
+              service_account:
+                componentInputParameter: pipelinechannel--service_account
+              storage_secret_name:
+                componentInputParameter: pipelinechannel--storage_secret_name
+          taskInfo:
+            name: deploy-component
+        upload-model-to-s3-component:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-upload-model-to-s3-component
+          inputs:
+            artifacts:
+              model_artifact:
+                componentInputArtifact: pipelinechannel--train-component-model_artifact
+            parameters:
+              s3_prefix:
+                componentInputParameter: pipelinechannel--s3_prefix
+          taskInfo:
+            name: upload-model-to-s3-component
+    inputDefinitions:
+      artifacts:
+        pipelinechannel--train-component-model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        pipelinechannel--isvc_name:
+          parameterType: STRING
+        pipelinechannel--namespace:
+          parameterType: STRING
+        pipelinechannel--runtime_name:
+          parameterType: STRING
+        pipelinechannel--s3_prefix:
+          parameterType: STRING
+        pipelinechannel--service_account:
+          parameterType: STRING
+        pipelinechannel--storage_secret_name:
+          parameterType: STRING
+        pipelinechannel--validate-component-Output:
+          parameterType: STRING
+  comp-datos-component:
+    executorLabel: exec-datos-component
+    inputDefinitions:
+      artifacts:
+        repo:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        csv_name:
+          defaultValue: chars74k_labels.csv
+          isOptional: true
+          parameterType: STRING
+        dataset_rel_dir:
+          defaultValue: data/english/fnt
+          isOptional: true
+          parameterType: STRING
+        dataset_version:
+          defaultValue: v1
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        datos_artifacts:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-deploy-component:
+    executorLabel: exec-deploy-component
+    inputDefinitions:
+      parameters:
+        isvc_name:
+          defaultValue: ocr-rest
+          isOptional: true
+          parameterType: STRING
+        model_s3_uri:
+          parameterType: STRING
+        namespace:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        runtime_name:
+          defaultValue: ocr-rest-runtime
+          isOptional: true
+          parameterType: STRING
+        service_account:
+          defaultValue: default
+          isOptional: true
+          parameterType: STRING
+        storage_secret_name:
+          defaultValue: ocr-s3-creds
+          isOptional: true
+          parameterType: STRING
+  comp-git-clone-component:
+    executorLabel: exec-git-clone-component
+    inputDefinitions:
+      parameters:
+        branch:
+          defaultValue: main
+          isOptional: true
+          parameterType: STRING
+        repo_url:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        repo:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-component:
+    executorLabel: exec-train-component
+    inputDefinitions:
+      artifacts:
+        datos_artifacts:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        repo:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        batch_size:
+          defaultValue: 64.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        csv_name:
+          defaultValue: chars74k_labels.csv
+          isOptional: true
+          parameterType: STRING
+        dataset_rel_dir:
+          defaultValue: data/english/fnt
+          isOptional: true
+          parameterType: STRING
+        epochs:
+          defaultValue: 3.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        lr:
+          defaultValue: 0.001
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+        val_split:
+          defaultValue: 0.2
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+  comp-upload-model-to-s3-component:
+    executorLabel: exec-upload-model-to-s3-component
+    inputDefinitions:
+      artifacts:
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        s3_prefix:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        model_s3_uri:
+          parameterType: STRING
+  comp-validate-component:
+    executorLabel: exec-validate-component
+    inputDefinitions:
+      artifacts:
+        datos_artifacts:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        repo:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        csv_name:
+          defaultValue: chars74k_labels.csv
+          isOptional: true
+          parameterType: STRING
+        dataset_rel_dir:
+          defaultValue: data/english/fnt
+          isOptional: true
+          parameterType: STRING
+        min_accuracy:
+          defaultValue: 0.9
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+        repetitions:
+          defaultValue: 50.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        warmup:
+          defaultValue: 10.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        validation_artifacts:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        validation_metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+      parameters:
+        Output:
+          parameterType: STRING
 deploymentSpec:
   executors:
-    exec-datos:
+    exec-datos-component:
       container:
         args:
         - --executor_input
         - '{{$}}'
         - --function_to_execute
-        - datos
+        - datos_component
         command:
         - sh
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
-          $0\" \"$@\"\n"
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas==2.2.2'\
+          \ 'matplotlib==3.9.2' 'seaborn==0.13.2' 'pillow==10.4.0'  &&  python3 -m\
+          \ pip install --quiet --no-warn-script-location 'kfp==2.15.2' '--no-deps'\
+          \ 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\
+          \n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -38,24 +285,81 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef datos():\n    import os\n    print(\"[DATOS] Hola desde Kubeflow\
-          \ / OpenShift AI\")\n    print(\"[DATOS] NB_PREFIX =\", os.environ.get(\"\
-          NB_PREFIX\"))\n    print(\"[DATOS] KUBERNETES_SERVICE_HOST =\", os.environ.get(\"\
-          KUBERNETES_SERVICE_HOST\"))\n    print(\"[DATOS] Done\")\n\n"
+          \ *\n\ndef datos_component(\n    repo: Input[Dataset],\n    dataset_rel_dir:\
+          \ str = \"data/english/fnt\",\n    csv_name: str = \"chars74k_labels.csv\"\
+          ,\n    dataset_version: str = \"v1\",\n    datos_artifacts: Output[Dataset]\
+          \ = None,\n):\n    \"\"\"\n    Step DATOS:\n      - Lee dataset desde <repo.path>/<dataset_rel_dir>\n\
+          \      - Genera CSV + mapping/version + plot EDA\n      - Escribe todo en\
+          \ datos_artifacts.path (artifact KFP)\n    \"\"\"\n    import os\n    import\
+          \ json\n    import string\n    from pathlib import Path\n\n    import pandas\
+          \ as pd\n    import matplotlib.pyplot as plt\n    import seaborn as sns\n\
+          \n    # ----------------------------\n    # Paths\n    # ----------------------------\n\
+          \    repo_root = Path(repo.path)\n    ds_root = repo_root / dataset_rel_dir\n\
+          \    if not ds_root.exists():\n        raise FileNotFoundError(\n      \
+          \      f\"Dataset dir not found: {ds_root.resolve()}\\n\"\n            f\"\
+          Repo root contents: {[p.name for p in repo_root.iterdir()]}\"\n        )\n\
+          \n    out_dir = Path(datos_artifacts.path)\n    out_dir.mkdir(parents=True,\
+          \ exist_ok=True)\n    eda_dir = out_dir / \"eda\"\n    eda_dir.mkdir(parents=True,\
+          \ exist_ok=True)\n\n    # ----------------------------\n    # Config & mappings\
+          \ (igual que tu MLflow)\n    # ----------------------------\n    digits\
+          \ = \"0123456789\"\n    uppercase = string.ascii_uppercase\n\n    char_to_label\
+          \ = {d: i for i, d in enumerate(digits)}\n    for i, ch in enumerate(uppercase,\
+          \ start=10):\n        char_to_label[ch] = i\n\n    label_to_char = {v: k\
+          \ for k, v in char_to_label.items()}\n    num_classes = len(char_to_label)\n\
+          \n    # ----------------------------\n    # 1) Recolecci\xF3n\n    # ----------------------------\n\
+          \    rows = []\n    samples = sorted(os.listdir(ds_root))\n\n    for sample\
+          \ in samples:\n        if not sample.startswith(\"Sample\"):\n         \
+          \   continue\n\n        try:\n            num = int(sample.replace(\"Sample\"\
+          , \"\"))\n        except ValueError:\n            continue\n\n        if\
+          \ 1 <= num <= 10:\n            label = str(num - 1)\n        elif 11 <=\
+          \ num <= 36:\n            label = chr(ord(\"A\") + (num - 11))\n       \
+          \ else:\n            continue\n\n        folder = ds_root / sample\n   \
+          \     if not folder.is_dir():\n            continue\n\n        for fname\
+          \ in os.listdir(folder):\n            if fname.lower().endswith(\".png\"\
+          ):\n                rows.append(\n                    {\n              \
+          \          \"path\": f\"{sample}/{fname}\",  # path relativo a dataset_rel_dir\n\
+          \                        \"label\": label,\n                    }\n    \
+          \            )\n\n    df_raw = pd.DataFrame(rows)\n\n    # ----------------------------\n\
+          \    # 2) Limpieza (placeholder)\n    # ----------------------------\n \
+          \   df_clean = df_raw.copy()\n\n    # ----------------------------\n   \
+          \ # 3) Transformaci\xF3n / Enriquecimiento\n    # ----------------------------\n\
+          \    mapping_path = out_dir / \"mapping.json\"\n    mapping_path.write_text(\n\
+          \        json.dumps({\"char_to_label\": char_to_label, \"label_to_char\"\
+          : label_to_char}, indent=4)\n    )\n\n    # ----------------------------\n\
+          \    # 4) EDA\n    # ----------------------------\n    if \"label\" not\
+          \ in df_clean.columns:\n        raise ValueError(\"Expected column 'label'\
+          \ not found in dataframe\")\n\n    plt.figure(figsize=(12, 4))\n    sns.countplot(data=df_clean,\
+          \ x=\"label\", order=sorted(df_clean[\"label\"].unique()))\n    plt.title(\"\
+          Distribuci\xF3n de clases en Chars74K (digits + uppercase)\")\n    plt.xticks(rotation=90)\n\
+          \    plt.tight_layout()\n\n    plot_path = eda_dir / \"class_distribution.png\"\
+          \n    plt.savefig(plot_path)\n    plt.close()\n\n    # ----------------------------\n\
+          \    # 5) Versionado\n    # ----------------------------\n    version_file\
+          \ = out_dir / \"version.json\"\n    version_file.write_text(\n        json.dumps(\n\
+          \            {\n                \"dataset_version\": dataset_version,\n\
+          \                \"dataset_rel_dir\": dataset_rel_dir,\n               \
+          \ \"num_samples\": int(len(df_clean)),\n                \"num_classes\"\
+          : int(num_classes),\n            },\n            indent=4,\n        )\n\
+          \    )\n\n    # CSV final\n    csv_path = out_dir / csv_name\n    df_clean.to_csv(csv_path,\
+          \ index=False)\n\n    # Logs\n    print(\"[DATOS] repo.path:\", repo_root)\n\
+          \    print(\"[DATOS] dataset:\", ds_root)\n    print(\"[DATOS] num_samples:\"\
+          , len(df_clean))\n    print(\"[DATOS] wrote:\", csv_path)\n    print(\"\
+          [DATOS] wrote:\", mapping_path)\n    print(\"[DATOS] wrote:\", version_file)\n\
+          \    print(\"[DATOS] wrote:\", plot_path)\n\n"
         image: registry.access.redhat.com/ubi9/python-311
-    exec-deploy:
+    exec-deploy-component:
       container:
         args:
         - --executor_input
         - '{{$}}'
         - --function_to_execute
-        - deploy
+        - deploy_component
         command:
         - sh
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kubernetes==30.1.0'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -69,22 +373,64 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef deploy():\n    print(\"[DEPLOY] Deploy placeholder\")\n    print(\"\
-          [DEPLOY] Done\")\n\n"
+          \ *\n\ndef deploy_component(\n    model_s3_uri: str,\n    runtime_name:\
+          \ str = \"ocr-rest-runtime\",\n    isvc_name: str = \"ocr-rest\",\n    namespace:\
+          \ str = \"\",\n    storage_secret_name: str = \"ocr-s3-creds\",\n    service_account:\
+          \ str = \"default\",\n):\n    \"\"\"\n    Crea/actualiza un InferenceService\
+          \ (KServe) para servir el modelo desde S3.\n\n    - model_s3_uri: \"s3://bucket/prefix\"\
+          \n    - runtime_name: ServingRuntime existente (custom runtime / modelmesh\
+          \ runtime, etc.)\n    - storage_secret_name: Secret con credenciales/endpoint\
+          \ para S3 (seg\xFAn tu instalaci\xF3n)\n    \"\"\"\n    from kubernetes\
+          \ import client, config\n    from kubernetes.client.exceptions import ApiException\n\
+          \n    # Dentro del cluster\n    config.load_incluster_config()\n\n    core\
+          \ = client.CoreV1Api()\n    co_api = client.CustomObjectsApi()\n\n    if\
+          \ not namespace:\n        with open(\"/var/run/secrets/kubernetes.io/serviceaccount/namespace\"\
+          , \"r\") as f:\n            namespace = f.read().strip()\n\n    print(\"\
+          [DEPLOY] namespace:\", namespace)\n    print(\"[DEPLOY] storageUri:\", model_s3_uri)\n\
+          \    print(\"[DEPLOY] runtime:\", runtime_name)\n    print(\"[DEPLOY] isvc:\"\
+          , isvc_name)\n\n    # Verifica Secret\n    try:\n        core.read_namespaced_secret(storage_secret_name,\
+          \ namespace)\n        print(f\"[DEPLOY] Secret OK: {storage_secret_name}\"\
+          )\n    except ApiException as e:\n        raise RuntimeError(\n        \
+          \    f\"[DEPLOY] Secret not found: {storage_secret_name} in ns {namespace}.\
+          \ Error: {e}\"\n        )\n\n    # InferenceService\n    isvc = {\n    \
+          \    \"apiVersion\": \"serving.kserve.io/v1beta1\",\n        \"kind\": \"\
+          InferenceService\",\n        \"metadata\": {\n            \"name\": isvc_name,\n\
+          \            \"namespace\": namespace,\n            \"annotations\": {\n\
+          \                # OJO: esta annotation es la m\xE1s com\xFAn para S3 creds\
+          \ en KServe\n                \"serving.kserve.io/storageSecretName\": storage_secret_name,\n\
+          \            },\n        },\n        \"spec\": {\n            \"predictor\"\
+          : {\n                \"serviceAccountName\": service_account,\n        \
+          \        \"model\": {\n                    \"modelFormat\": {\"name\": \"\
+          ocr-rest\"},\n                    \"runtime\": runtime_name,\n         \
+          \           \"storageUri\": model_s3_uri,\n                }\n         \
+          \   }\n        },\n    }\n\n    group = \"serving.kserve.io\"\n    version\
+          \ = \"v1beta1\"\n    plural = \"inferenceservices\"\n\n    # Upsert create/patch\n\
+          \    try:\n        co_api.get_namespaced_custom_object(group, version, namespace,\
+          \ plural, isvc_name)\n        print(\"[DEPLOY] InferenceService exists,\
+          \ patching...\")\n        co_api.patch_namespaced_custom_object(group, version,\
+          \ namespace, plural, isvc_name, isvc)\n        print(\"[DEPLOY] Patched\
+          \ InferenceService:\", isvc_name)\n    except ApiException as e:\n     \
+          \   if e.status == 404:\n            print(\"[DEPLOY] InferenceService not\
+          \ found, creating...\")\n            co_api.create_namespaced_custom_object(group,\
+          \ version, namespace, plural, isvc)\n            print(\"[DEPLOY] Created\
+          \ InferenceService:\", isvc_name)\n        else:\n            raise\n\n\
+          \    print(\"[DEPLOY] Done. Wait until READY (oc get isvc -n <ns>).\")\n\
+          \n"
         image: registry.access.redhat.com/ubi9/python-311
-    exec-train:
+    exec-git-clone-component:
       container:
         args:
         - --executor_input
         - '{{$}}'
         - --function_to_execute
-        - train
+        - git_clone_component
         command:
         - sh
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'gitpython==3.1.43'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -98,23 +444,176 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef train():\n    import os\n    print(\"[TRAIN] Entrenamiento placeholder\"\
-          )\n    print(\"[TRAIN] PYTHON_VERSION =\", os.environ.get(\"PYTHON_VERSION\"\
-          ))\n    print(\"[TRAIN] Done\")\n\n"
+          \ *\n\ndef git_clone_component(\n    repo_url: str,\n    branch: str = \"\
+          main\",\n    repo: Output[Dataset] = None,\n):\n    \"\"\"\n    Clona un\
+          \ repo Git en repo.path (directorio gestionado por KFP).\n    KFP subir\xE1\
+          \ este artifact a S3/ODF y lo har\xE1 accesible en steps posteriores.\n\
+          \    \"\"\"\n    from pathlib import Path\n    from git import Repo\n\n\
+          \    out = Path(repo.path)\n    out.mkdir(parents=True, exist_ok=True)\n\
+          \n    print(f\"[GIT] Cloning {repo_url}@{branch} -> {out}\")\n    Repo.clone_from(repo_url,\
+          \ out, branch=branch, depth=1)\n\n    print(\"[GIT] Done. Top-level:\",\
+          \ [p.name for p in out.iterdir()])\n\n"
         image: registry.access.redhat.com/ubi9/python-311
-    exec-validate:
+    exec-train-component:
       container:
         args:
         - --executor_input
         - '{{$}}'
         - --function_to_execute
-        - validate
+        - train_component
         command:
         - sh
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas==2.2.2'\
+          \ 'pillow==10.4.0' 'torch==2.4.1' 'torchvision==0.19.1' 'scikit-learn==1.5.2'\
+          \ 'matplotlib==3.9.2' 'seaborn==0.13.2'  &&  python3 -m pip install --quiet\
+          \ --no-warn-script-location 'kfp==2.15.2' '--no-deps' 'typing-extensions>=3.7.4,<5;\
+          \ python_version<\"3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_component(\n    repo: Input[Dataset],\n    datos_artifacts:\
+          \ Input[Dataset],\n    dataset_rel_dir: str = \"data/english/fnt\",\n  \
+          \  csv_name: str = \"chars74k_labels.csv\",\n    epochs: int = 3,\n    batch_size:\
+          \ int = 64,\n    val_split: float = 0.2,\n    lr: float = 1e-3,\n    model_artifact:\
+          \ Output[Model] = None,\n):\n    \"\"\"\n    Step TRAIN:\n      - Lee CSV\
+          \ generado en datos_artifacts\n      - Carga im\xE1genes desde repo + dataset_rel_dir\n\
+          \      - Entrena CNN simple\n      - Guarda modelo y artefactos en model_artifact.path\n\
+          \    \"\"\"\n    import json\n    import os\n    from dataclasses import\
+          \ asdict, dataclass\n    from pathlib import Path\n\n    import pandas as\
+          \ pd\n    from PIL import Image\n\n    import torch\n    import torch.nn\
+          \ as nn\n    import torch.optim as optim\n    import torchvision.transforms\
+          \ as T\n    from torch.utils.data import Dataset, DataLoader, random_split\n\
+          \n    import matplotlib.pyplot as plt\n    import seaborn as sns\n    from\
+          \ sklearn.metrics import confusion_matrix\n\n    # ----------------------------\n\
+          \    # Paths\n    # ----------------------------\n    repo_root = Path(repo.path)\n\
+          \    ds_root = repo_root / dataset_rel_dir\n    if not ds_root.exists():\n\
+          \        raise FileNotFoundError(f\"Dataset dir not found: {ds_root.resolve()}\"\
+          )\n\n    datos_dir = Path(datos_artifacts.path)\n    csv_path = datos_dir\
+          \ / csv_name\n    if not csv_path.exists():\n        raise FileNotFoundError(f\"\
+          CSV not found in datos_artifacts: {csv_path.resolve()}\")\n\n    mapping_path\
+          \ = datos_dir / \"mapping.json\"\n    if not mapping_path.exists():\n  \
+          \      raise FileNotFoundError(f\"mapping.json not found in datos_artifacts:\
+          \ {mapping_path.resolve()}\")\n\n    out_dir = Path(model_artifact.path)\n\
+          \    out_dir.mkdir(parents=True, exist_ok=True)\n    (out_dir / \"eda\"\
+          ).mkdir(parents=True, exist_ok=True)\n\n    # ----------------------------\n\
+          \    # Load mapping\n    # ----------------------------\n    mapping = json.loads(mapping_path.read_text())\n\
+          \    char_to_label = mapping[\"char_to_label\"]\n    label_to_char = {int(k):\
+          \ v for k, v in mapping[\"label_to_char\"].items()}  # keys can come as\
+          \ strings\n\n    num_classes = len(char_to_label)\n\n    # ----------------------------\n\
+          \    # Transform (igual que tu notebook)\n    # ----------------------------\n\
+          \    transform_ocr = T.Compose(\n        [\n            T.Resize((32, 32)),\n\
+          \            T.ToTensor(),\n            T.Normalize(mean=[0.5], std=[0.5]),\n\
+          \        ]\n    )\n\n    # ----------------------------\n    # Dataset (igual\
+          \ que tu CharsDataset)\n    # ----------------------------\n    class CharsDataset(Dataset):\n\
+          \        def __init__(self, df: pd.DataFrame, root_dir: Path, transform=None):\n\
+          \            self.df = df.reset_index(drop=True)\n            self.root\
+          \ = root_dir\n            self.transform = transform\n\n        def __len__(self):\n\
+          \            return len(self.df)\n\n        def __getitem__(self, idx):\n\
+          \            row = self.df.iloc[idx]\n            img_path = self.root /\
+          \ row[\"path\"]  # path relativo tipo SampleXXX/img.png\n            label_char\
+          \ = row[\"label\"]\n            label_idx = int(char_to_label[label_char])\n\
+          \n            img = Image.open(img_path).convert(\"L\")\n            if\
+          \ self.transform:\n                img = self.transform(img)\n\n       \
+          \     return img, label_idx\n\n    # ----------------------------\n    #\
+          \ Model\n    # ----------------------------\n    class SimpleCNN(nn.Module):\n\
+          \        def __init__(self, num_classes: int):\n            super().__init__()\n\
+          \            self.net = nn.Sequential(\n                nn.Conv2d(1, 16,\
+          \ 3, padding=1),\n                nn.ReLU(),\n                nn.MaxPool2d(2),\n\
+          \                nn.Conv2d(16, 32, 3, padding=1),\n                nn.ReLU(),\n\
+          \                nn.MaxPool2d(2),\n                nn.Flatten(),\n     \
+          \           nn.Linear(32 * 8 * 8, 128),\n                nn.ReLU(),\n  \
+          \              nn.Linear(128, num_classes),\n            )\n\n        def\
+          \ forward(self, x):\n            return self.net(x)\n\n    # ----------------------------\n\
+          \    # Helpers\n    # ----------------------------\n    def train_one_epoch(model,\
+          \ loader, device, opt, crit):\n        model.train()\n        total_loss,\
+          \ correct = 0.0, 0\n\n        for imgs, labels in loader:\n            imgs,\
+          \ labels = imgs.to(device), labels.to(device)\n\n            opt.zero_grad(set_to_none=True)\n\
+          \            out = model(imgs)\n            loss = crit(out, labels)\n \
+          \           loss.backward()\n            opt.step()\n\n            total_loss\
+          \ += float(loss.item())\n            correct += int((out.argmax(1) == labels).sum().item())\n\
+          \n        return total_loss / max(1, len(loader)), correct / max(1, len(loader.dataset))\n\
+          \n    def eval_one_epoch(model, loader, device, crit):\n        model.eval()\n\
+          \        total_loss, correct = 0.0, 0\n        preds, labels_all = [], []\n\
+          \n        with torch.no_grad():\n            for imgs, labels in loader:\n\
+          \                imgs, labels = imgs.to(device), labels.to(device)\n   \
+          \             out = model(imgs)\n                loss = crit(out, labels)\n\
+          \n                total_loss += float(loss.item())\n                correct\
+          \ += int((out.argmax(1) == labels).sum().item())\n\n                preds.extend(out.argmax(1).cpu().numpy().tolist())\n\
+          \                labels_all.extend(labels.cpu().numpy().tolist())\n\n  \
+          \      return total_loss / max(1, len(loader)), correct / max(1, len(loader.dataset)),\
+          \ labels_all, preds\n\n    def save_confusion_matrix(labels, preds, path:\
+          \ Path):\n        cm = confusion_matrix(labels, preds)\n        plt.figure(figsize=(14,\
+          \ 10))\n        sns.heatmap(cm, cmap=\"Blues\")\n        plt.title(\"Confusion\
+          \ Matrix\")\n        plt.tight_layout()\n        plt.savefig(path)\n   \
+          \     plt.close()\n        return path\n\n    # ----------------------------\n\
+          \    # Load data\n    # ----------------------------\n    df = pd.read_csv(csv_path)\n\
+          \    dataset = CharsDataset(df, root_dir=ds_root, transform=transform_ocr)\n\
+          \n    val_len = int(len(dataset) * float(val_split))\n    train_len = len(dataset)\
+          \ - val_len\n    train_ds, val_ds = random_split(dataset, [train_len, val_len])\n\
+          \n    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)\n\
+          \    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)\n\
+          \n    # ----------------------------\n    # Train\n    # ----------------------------\n\
+          \    device = \"cuda\" if torch.cuda.is_available() else \"cpu\"\n    model\
+          \ = SimpleCNN(num_classes=num_classes).to(device)\n    crit = nn.CrossEntropyLoss()\n\
+          \    opt = optim.Adam(model.parameters(), lr=float(lr))\n\n    history =\
+          \ []\n    last_val_acc = 0.0\n\n    for ep in range(int(epochs)):\n    \
+          \    tr_loss, tr_acc = train_one_epoch(model, train_loader, device, opt,\
+          \ crit)\n        val_loss, val_acc, y_true, y_pred = eval_one_epoch(model,\
+          \ val_loader, device, crit)\n\n        last_val_acc = float(val_acc)\n \
+          \       history.append(\n            {\n                \"epoch\": ep,\n\
+          \                \"train_loss\": float(tr_loss),\n                \"train_acc\"\
+          : float(tr_acc),\n                \"val_loss\": float(val_loss),\n     \
+          \           \"val_acc\": float(val_acc),\n            }\n        )\n\n \
+          \       print(f\"[Epoch {ep}] Train acc={tr_acc:.3f} | Val acc={val_acc:.3f}\"\
+          )\n\n    # Confusion matrix (\xFAltimo epoch)\n    cm_path = save_confusion_matrix(y_true,\
+          \ y_pred, out_dir / \"confusion_matrix.png\")\n\n    # ----------------------------\n\
+          \    # Save model + metadata\n    # ----------------------------\n    model_path\
+          \ = out_dir / \"model.pt\"\n    torch.save(model.state_dict(), model_path)\n\
+          \n    # Guardamos un peque\xF1o \"spec\" para reconstruir el modelo\n  \
+          \  spec = {\n        \"arch\": \"SimpleCNN\",\n        \"num_classes\":\
+          \ int(num_classes),\n        \"input_shape\": [1, 32, 32],\n        \"normalization\"\
+          : {\"mean\": [0.5], \"std\": [0.5]},\n        \"label_to_char\": label_to_char,\
+          \  # \xFAtil para inferencia\n        \"char_to_label\": char_to_label,\n\
+          \    }\n    (out_dir / \"model_spec.json\").write_text(json.dumps(spec,\
+          \ indent=2))\n\n    metrics = {\n        \"val_acc\": float(last_val_acc),\n\
+          \        \"epochs\": int(epochs),\n        \"batch_size\": int(batch_size),\n\
+          \        \"val_split\": float(val_split),\n        \"lr\": float(lr),\n\
+          \    }\n    (out_dir / \"metrics.json\").write_text(json.dumps(metrics,\
+          \ indent=2))\n    (out_dir / \"history.json\").write_text(json.dumps(history,\
+          \ indent=2))\n\n    # KFP: metadatos del artifact Model (opcional pero muy\
+          \ \xFAtil)\n    model_artifact.metadata[\"framework\"] = \"pytorch\"\n \
+          \   model_artifact.metadata[\"arch\"] = \"SimpleCNN\"\n    model_artifact.metadata[\"\
+          val_acc\"] = float(last_val_acc)\n    model_artifact.metadata[\"num_classes\"\
+          ] = int(num_classes)\n\n    print(\"[TRAIN] wrote:\", model_path)\n    print(\"\
+          [TRAIN] wrote:\", cm_path)\n    print(\"[TRAIN] wrote:\", out_dir / \"model_spec.json\"\
+          )\n    print(\"[TRAIN] wrote:\", out_dir / \"metrics.json\")\n    print(\"\
+          [TRAIN] Done.\")\n\n"
+        image: registry.access.redhat.com/ubi9/python-311
+    exec-upload-model-to-s3-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - upload_model_to_s3_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'boto3==1.35.30'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -128,48 +627,347 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef validate():\n    print(\"[VALIDATE] Validaci\xF3n placeholder\"\
-          )\n    print(\"[VALIDATE] Done\")\n\n"
+          \ *\n\ndef upload_model_to_s3_component(\n    model_artifact: Input[Model],\n\
+          \    s3_prefix: str,\n    model_s3_uri: OutputPath(str),\n):\n    \"\"\"\
+          \n    Sube el contenido de model_artifact.path a:\n      s3://<AWS_S3_BUCKET>/<s3_prefix>/\n\
+          \n    Requiere env vars (en el contenedor del step):\n      - AWS_S3_ENDPOINT\
+          \  (ej: https://minio-api-... o https://s3.openshift-storage.svc)\n    \
+          \  - AWS_S3_BUCKET\n      - AWS_DEFAULT_REGION (opcional)\n    Y credenciales\
+          \ (habitualmente ya est\xE1n en el pod v\xEDa Secret/SA):\n      - AWS_ACCESS_KEY_ID\n\
+          \      - AWS_SECRET_ACCESS_KEY\n    \"\"\"\n    import os\n    from pathlib\
+          \ import Path\n\n    import boto3\n    from botocore.config import Config\n\
+          \n    endpoint = os.environ.get(\"AWS_S3_ENDPOINT\")\n    bucket = os.environ.get(\"\
+          AWS_S3_BUCKET\")\n    region = os.environ.get(\"AWS_DEFAULT_REGION\", \"\
+          us-east-1\")\n\n    if not endpoint:\n        raise RuntimeError(\"Missing\
+          \ env var AWS_S3_ENDPOINT\")\n    if not bucket:\n        raise RuntimeError(\"\
+          Missing env var AWS_S3_BUCKET\")\n\n    src_dir = Path(model_artifact.path)\n\
+          \    if not src_dir.exists():\n        raise FileNotFoundError(f\"model_artifact.path\
+          \ not found: {src_dir}\")\n\n    prefix = s3_prefix.strip(\"/\")\n\n   \
+          \ # Cliente S3 compatible (MinIO/ODF/etc.)\n    s3 = boto3.client(\n   \
+          \     \"s3\",\n        endpoint_url=endpoint,\n        region_name=region,\n\
+          \        config=Config(s3={\"addressing_style\": \"path\"}),\n    )\n\n\
+          \    # Subida recursiva\n    files_uploaded = 0\n    for p in src_dir.rglob(\"\
+          *\"):\n        if p.is_dir():\n            continue\n        rel = p.relative_to(src_dir).as_posix()\n\
+          \        key = f\"{prefix}/{rel}\"\n        s3.upload_file(str(p), bucket,\
+          \ key)\n        files_uploaded += 1\n\n    uri = f\"s3://{bucket}/{prefix}\"\
+          \n    Path(model_s3_uri).write_text(uri)\n\n    print(\"[UPLOAD] endpoint:\"\
+          , endpoint)\n    print(\"[UPLOAD] bucket:\", bucket)\n    print(\"[UPLOAD]\
+          \ prefix:\", prefix)\n    print(\"[UPLOAD] files_uploaded:\", files_uploaded)\n\
+          \    print(\"[UPLOAD] model_s3_uri:\", uri)\n\n"
+        image: registry.access.redhat.com/ubi9/python-311
+    exec-validate-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - validate_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas==2.2.2'\
+          \ 'pillow==10.4.0' 'torch==2.4.1' 'torchvision==0.19.1' 'scikit-learn==1.5.2'\
+          \ 'matplotlib==3.9.2' 'seaborn==0.13.2' 'numpy==2.0.2'  &&  python3 -m pip\
+          \ install --quiet --no-warn-script-location 'kfp==2.15.2' '--no-deps' 'typing-extensions>=3.7.4,<5;\
+          \ python_version<\"3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef validate_component(\n    repo: Input[Dataset],\n    datos_artifacts:\
+          \ Input[Dataset],\n    model_artifact: Input[Model],\n    validation_metrics:\
+          \ Output[Metrics],\n    validation_artifacts: Output[Dataset],\n    # Defaults\n\
+          \    dataset_rel_dir: str = \"data/english/fnt\",\n    csv_name: str = \"\
+          chars74k_labels.csv\",\n    repetitions: int = 50,\n    warmup: int = 10,\n\
+          \    min_accuracy: float = 0.90,\n) -> str:\n    \"\"\"\n    Returns:\n\
+          \      \"true\" if accuracy >= min_accuracy else \"false\"\n    \"\"\"\n\
+          \    import json\n    import time\n    from pathlib import Path\n\n    import\
+          \ numpy as np\n    import pandas as pd\n    from PIL import Image\n\n  \
+          \  import torch\n    import torch.nn as nn\n    import torchvision.transforms\
+          \ as T\n    from torch.utils.data import Dataset\n\n    import matplotlib.pyplot\
+          \ as plt\n    import seaborn as sns\n    from sklearn.metrics import (\n\
+          \        accuracy_score,\n        f1_score,\n        recall_score,\n   \
+          \     precision_score,\n        confusion_matrix,\n    )\n\n    # ----------------------------\n\
+          \    # Paths\n    # ----------------------------\n    repo_root = Path(repo.path)\n\
+          \    ds_root = repo_root / dataset_rel_dir\n    if not ds_root.exists():\n\
+          \        raise FileNotFoundError(\n            f\"Dataset dir not found:\
+          \ {ds_root.resolve()}\\n\"\n            f\"Repo root contents: {[p.name\
+          \ for p in repo_root.iterdir()]}\"\n        )\n\n    datos_dir = Path(datos_artifacts.path)\n\
+          \    csv_path = datos_dir / csv_name\n    if not csv_path.exists():\n  \
+          \      raise FileNotFoundError(\n            f\"CSV not found: {csv_path.resolve()}\\\
+          n\"\n            f\"Datos dir contents: {[p.name for p in datos_dir.iterdir()]}\"\
+          \n        )\n\n    mapping_path = datos_dir / \"mapping.json\"\n    if not\
+          \ mapping_path.exists():\n        raise FileNotFoundError(f\"mapping.json\
+          \ not found: {mapping_path.resolve()}\")\n\n    model_dir = Path(model_artifact.path)\n\
+          \    model_pt = model_dir / \"model.pt\"\n    model_spec_path = model_dir\
+          \ / \"model_spec.json\"\n    if not model_pt.exists():\n        raise FileNotFoundError(f\"\
+          model.pt not found: {model_pt.resolve()}\")\n    if not model_spec_path.exists():\n\
+          \        raise FileNotFoundError(f\"model_spec.json not found: {model_spec_path.resolve()}\"\
+          )\n\n    out_dir = Path(validation_artifacts.path)\n    out_dir.mkdir(parents=True,\
+          \ exist_ok=True)\n\n    # ----------------------------\n    # Load mappings/spec\n\
+          \    # ----------------------------\n    mapping = json.loads(mapping_path.read_text())\n\
+          \    char_to_label = mapping[\"char_to_label\"]\n\n    spec = json.loads(model_spec_path.read_text())\n\
+          \    num_classes = int(spec[\"num_classes\"])\n\n    # ----------------------------\n\
+          \    # Rebuild model (same as train)\n    # ----------------------------\n\
+          \    class SimpleCNN(nn.Module):\n        def __init__(self, num_classes:\
+          \ int):\n            super().__init__()\n            self.net = nn.Sequential(\n\
+          \                nn.Conv2d(1, 16, 3, padding=1),\n                nn.ReLU(),\n\
+          \                nn.MaxPool2d(2),\n                nn.Conv2d(16, 32, 3,\
+          \ padding=1),\n                nn.ReLU(),\n                nn.MaxPool2d(2),\n\
+          \                nn.Flatten(),\n                nn.Linear(32 * 8 * 8, 128),\n\
+          \                nn.ReLU(),\n                nn.Linear(128, num_classes),\n\
+          \            )\n\n        def forward(self, x):\n            return self.net(x)\n\
+          \n    device = \"cuda\" if torch.cuda.is_available() else \"cpu\"\n    model\
+          \ = SimpleCNN(num_classes=num_classes).to(device)\n\n    # Recomendado por\
+          \ warning de PyTorch\n    state = torch.load(model_pt, map_location=device,\
+          \ weights_only=True)\n    model.load_state_dict(state)\n    model.eval()\n\
+          \n    # ----------------------------\n    # Transform\n    # ----------------------------\n\
+          \    transform_ocr = T.Compose(\n        [\n            T.Resize((32, 32)),\n\
+          \            T.ToTensor(),\n            T.Normalize(mean=[0.5], std=[0.5]),\n\
+          \        ]\n    )\n\n    # ----------------------------\n    # Dataset\n\
+          \    # ----------------------------\n    class CharsDataset(Dataset):\n\
+          \        def __init__(self, df: pd.DataFrame, root_dir: Path, transform=None):\n\
+          \            self.df = df.reset_index(drop=True)\n            self.root\
+          \ = root_dir\n            self.transform = transform\n\n        def __len__(self):\n\
+          \            return len(self.df)\n\n        def __getitem__(self, idx):\n\
+          \            row = self.df.iloc[idx]\n            img_path = self.root /\
+          \ row[\"path\"]\n            label = row[\"label\"]  # char\n\n        \
+          \    if isinstance(label, str):\n                label = int(char_to_label[label])\n\
+          \            else:\n                label = int(label)\n\n            img\
+          \ = Image.open(img_path).convert(\"L\")\n            if self.transform:\n\
+          \                img = self.transform(img)\n            return img, label\n\
+          \n    df = pd.read_csv(csv_path)\n    dataset = CharsDataset(df, root_dir=ds_root,\
+          \ transform=transform_ocr)\n\n    # ----------------------------\n    #\
+          \ Inference\n    # ----------------------------\n    imgs, labels = [],\
+          \ []\n    for img, lab in dataset:\n        imgs.append(img.numpy())\n \
+          \       labels.append(int(lab))\n\n    x = torch.tensor(np.array(imgs),\
+          \ dtype=torch.float32).to(device)\n    y_true = np.array(labels, dtype=np.int64)\n\
+          \n    with torch.no_grad():\n        logits = model(x)\n        y_pred =\
+          \ logits.argmax(1).cpu().numpy()\n\n    # ----------------------------\n\
+          \    # Performance metrics\n    # ----------------------------\n    acc\
+          \ = float(accuracy_score(y_true, y_pred))\n    f1 = float(f1_score(y_true,\
+          \ y_pred, average=\"macro\"))\n    rec = float(recall_score(y_true, y_pred,\
+          \ average=\"macro\"))\n    prec = float(precision_score(y_true, y_pred,\
+          \ average=\"macro\"))\n\n    print(f\"[VALIDATE] acc={acc:.4f} f1={f1:.4f}\
+          \ recall={rec:.4f} precision={prec:.4f}\")\n\n    cm = confusion_matrix(y_true,\
+          \ y_pred)\n    plt.figure(figsize=(12, 9))\n    sns.heatmap(cm, cmap=\"\
+          Blues\")\n    plt.title(\"Confusion Matrix\")\n    plt.tight_layout()\n\
+          \    cm_path = out_dir / \"confusion_matrix.png\"\n    plt.savefig(cm_path)\n\
+          \    plt.close()\n\n    # ----------------------------\n    # Operational:\
+          \ latency\n    # ----------------------------\n    dummy = torch.randn(1,\
+          \ 1, 32, 32, device=device)\n\n    with torch.no_grad():\n        for _\
+          \ in range(int(warmup)):\n            _ = model(dummy)\n\n    times = []\n\
+          \    with torch.no_grad():\n        for _ in range(int(repetitions)):\n\
+          \            t0 = time.time()\n            _ = model(dummy)\n          \
+          \  times.append(time.time() - t0)\n\n    latency_mean_ms = float(np.mean(times)\
+          \ * 1000.0)\n    latency_p95_ms = float(np.percentile(times, 95) * 1000.0)\n\
+          \    latency_p99_ms = float(np.percentile(times, 99) * 1000.0)\n\n    model_size_mb\
+          \ = float(model_pt.stat().st_size / (1024 * 1024))\n\n    report = {\n \
+          \       \"performance\": {\n            \"accuracy\": acc,\n           \
+          \ \"f1_macro\": f1,\n            \"recall_macro\": rec,\n            \"\
+          precision_macro\": prec,\n        },\n        \"operational\": {\n     \
+          \       \"latency_mean_ms\": latency_mean_ms,\n            \"latency_p95_ms\"\
+          : latency_p95_ms,\n            \"latency_p99_ms\": latency_p99_ms,\n   \
+          \         \"model_size_mb\": model_size_mb,\n            \"device\": device,\n\
+          \        },\n        \"inputs\": {\n            \"dataset_rel_dir\": dataset_rel_dir,\n\
+          \            \"csv_name\": csv_name,\n            \"num_samples\": int(len(dataset)),\n\
+          \        },\n        \"model\": {\"num_classes\": num_classes},\n    }\n\
+          \    (out_dir / \"report.json\").write_text(json.dumps(report, indent=2))\n\
+          \n    # KFP metrics (UI)\n    validation_metrics.log_metric(\"val_accuracy\"\
+          , acc)\n    validation_metrics.log_metric(\"val_f1_macro\", f1)\n    validation_metrics.log_metric(\"\
+          val_recall_macro\", rec)\n    validation_metrics.log_metric(\"val_precision_macro\"\
+          , prec)\n    validation_metrics.log_metric(\"latency_mean_ms\", latency_mean_ms)\n\
+          \    validation_metrics.log_metric(\"latency_p95_ms\", latency_p95_ms)\n\
+          \    validation_metrics.log_metric(\"latency_p99_ms\", latency_p99_ms)\n\
+          \    validation_metrics.log_metric(\"model_size_mb\", model_size_mb)\n\n\
+          \    is_passed = \"true\" if acc >= float(min_accuracy) else \"false\"\n\
+          \    print(\"[VALIDATE] passed:\", is_passed)\n    return is_passed\n\n"
         image: registry.access.redhat.com/ubi9/python-311
 pipelineInfo:
-  description: Pipeline OCR (datos -> train -> validate -> deploy) - placeholders
-  name: tfm-ocr-chars-pipeline
+  name: tfm-ocr-chars
 root:
   dag:
     tasks:
-      datos:
-        cachingOptions:
-          enableCache: true
+      condition-1:
         componentRef:
-          name: comp-datos
-        taskInfo:
-          name: datos
-      deploy:
-        cachingOptions:
-          enableCache: true
-        componentRef:
-          name: comp-deploy
+          name: comp-condition-1
         dependentTasks:
-        - validate
+        - train-component
+        - validate-component
+        inputs:
+          artifacts:
+            pipelinechannel--train-component-model_artifact:
+              taskOutputArtifact:
+                outputArtifactKey: model_artifact
+                producerTask: train-component
+          parameters:
+            pipelinechannel--isvc_name:
+              componentInputParameter: isvc_name
+            pipelinechannel--namespace:
+              componentInputParameter: namespace
+            pipelinechannel--runtime_name:
+              componentInputParameter: runtime_name
+            pipelinechannel--s3_prefix:
+              componentInputParameter: s3_prefix
+            pipelinechannel--service_account:
+              componentInputParameter: service_account
+            pipelinechannel--storage_secret_name:
+              componentInputParameter: storage_secret_name
+            pipelinechannel--validate-component-Output:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: validate-component
         taskInfo:
-          name: deploy
-      train:
+          name: condition-1
+        triggerPolicy:
+          condition: inputs.parameter_values['pipelinechannel--validate-component-Output']
+            == 'true'
+      datos-component:
         cachingOptions:
           enableCache: true
         componentRef:
-          name: comp-train
+          name: comp-datos-component
         dependentTasks:
-        - datos
+        - git-clone-component
+        inputs:
+          artifacts:
+            repo:
+              taskOutputArtifact:
+                outputArtifactKey: repo
+                producerTask: git-clone-component
+          parameters:
+            dataset_rel_dir:
+              componentInputParameter: dataset_rel_dir
         taskInfo:
-          name: train
-      validate:
+          name: datos-component
+      git-clone-component:
         cachingOptions:
           enableCache: true
         componentRef:
-          name: comp-validate
-        dependentTasks:
-        - train
+          name: comp-git-clone-component
+        inputs:
+          parameters:
+            branch:
+              componentInputParameter: branch
+            repo_url:
+              componentInputParameter: repo_url
         taskInfo:
-          name: validate
+          name: git-clone-component
+      train-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-component
+        dependentTasks:
+        - datos-component
+        - git-clone-component
+        inputs:
+          artifacts:
+            datos_artifacts:
+              taskOutputArtifact:
+                outputArtifactKey: datos_artifacts
+                producerTask: datos-component
+            repo:
+              taskOutputArtifact:
+                outputArtifactKey: repo
+                producerTask: git-clone-component
+          parameters:
+            dataset_rel_dir:
+              componentInputParameter: dataset_rel_dir
+        taskInfo:
+          name: train-component
+      validate-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-validate-component
+        dependentTasks:
+        - datos-component
+        - git-clone-component
+        - train-component
+        inputs:
+          artifacts:
+            datos_artifacts:
+              taskOutputArtifact:
+                outputArtifactKey: datos_artifacts
+                producerTask: datos-component
+            model_artifact:
+              taskOutputArtifact:
+                outputArtifactKey: model_artifact
+                producerTask: train-component
+            repo:
+              taskOutputArtifact:
+                outputArtifactKey: repo
+                producerTask: git-clone-component
+          parameters:
+            dataset_rel_dir:
+              componentInputParameter: dataset_rel_dir
+            min_accuracy:
+              componentInputParameter: min_accuracy
+        taskInfo:
+          name: validate-component
+  inputDefinitions:
+    parameters:
+      branch:
+        defaultValue: main
+        isOptional: true
+        parameterType: STRING
+      dataset_rel_dir:
+        defaultValue: data/english/fnt
+        isOptional: true
+        parameterType: STRING
+      isvc_name:
+        defaultValue: ocr-rest
+        isOptional: true
+        parameterType: STRING
+      min_accuracy:
+        defaultValue: 0.9
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      namespace:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      repo_url:
+        defaultValue: https://github.com/dbgjerez/tfm-ocr-model-openshift-ai.git
+        isOptional: true
+        parameterType: STRING
+      runtime_name:
+        defaultValue: ocr-rest-runtime
+        isOptional: true
+        parameterType: STRING
+      s3_bucket:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      s3_endpoint:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      s3_prefix:
+        defaultValue: models/ocr-rest/latest
+        isOptional: true
+        parameterType: STRING
+      s3_region:
+        defaultValue: us-east-1
+        isOptional: true
+        parameterType: STRING
+      service_account:
+        defaultValue: default
+        isOptional: true
+        parameterType: STRING
+      storage_secret_name:
+        defaultValue: ocr-s3-creds
+        isOptional: true
+        parameterType: STRING
 schemaVersion: 2.1.0
 sdkVersion: kfp-2.15.2
