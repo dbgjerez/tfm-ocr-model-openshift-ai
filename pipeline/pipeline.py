@@ -1,4 +1,5 @@
 from kfp import dsl
+from kfp import kubernetes
 
 from pipeline.components.git_clone_component import git_clone_component
 from pipeline.components.data_component import datos_component
@@ -23,7 +24,7 @@ def ocr_pipeline(
     runtime_name: str = "ocr-rest-runtime",
     isvc_name: str = "ocr-rest",
     namespace: str = "",       # vacío => autodetect en runtime
-    storage_secret_name: str = "ocr-s3-creds",
+    storage_secret_name: str = "ocr-model-s3",
     service_account: str = "default",
 ):
     # 1) CLONE
@@ -58,6 +59,18 @@ def ocr_pipeline(
             model_artifact=train_task.outputs["model_artifact"],
             s3_prefix=s3_prefix,
         )
+
+        kubernetes.use_secret_as_env(
+            upload_task,
+            secret_name="ocr-model-s3", 
+            secret_key_to_env={
+                "AWS_ACCESS_KEY_ID": "AWS_ACCESS_KEY_ID",
+                "AWS_SECRET_ACCESS_KEY": "AWS_SECRET_ACCESS_KEY",
+                "AWS_S3_ENDPOINT": "AWS_S3_ENDPOINT",
+                "AWS_S3_BUCKET": "AWS_S3_BUCKET",
+            },
+        )
+
 
         # 6) DEPLOY InferenceService apuntando a ese storageUri (S3)
         deploy_component(

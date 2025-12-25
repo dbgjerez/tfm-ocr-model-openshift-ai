@@ -14,16 +14,19 @@ def upload_model_to_s3_component(
     model_s3_uri: OutputPath(str),
 ):
     """
-    Sube el contenido de model_artifact.path a:
-      s3://<AWS_S3_BUCKET>/<s3_prefix>/
+    Upload for ModelMesh/OVMS serving.
 
-    Requiere env vars (en el contenedor del step):
-      - AWS_S3_ENDPOINT  (ej: https://minio-api-... o https://s3.openshift-storage.svc)
+    It uploads ONLY the serving artifacts (by default: model.onnx, and optionally
+    model_spec.json), and writes the exact ONNX URI into model_s3_uri.
+
+    Requires env vars in the step container:
+      - AWS_S3_ENDPOINT (recommended: internal svc URL, e.g. http://minio-service.<ns>.svc:9000)
       - AWS_S3_BUCKET
-      - AWS_DEFAULT_REGION (opcional)
-    Y credenciales (habitualmente ya están en el pod vía Secret/SA):
-      - AWS_ACCESS_KEY_ID
-      - AWS_SECRET_ACCESS_KEY
+      - AWS_DEFAULT_REGION (recommended, e.g. us-east-1)
+      - AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+
+    Output:
+      - model_s3_uri: s3://<bucket>/<s3_prefix>/model.onnx
     """
     import os
     from pathlib import Path
@@ -46,7 +49,22 @@ def upload_model_to_s3_component(
 
     prefix = s3_prefix.strip("/")
 
-    # Cliente S3 compatible (MinIO/ODF/etc.)
+    # --- Serving files we expect from TRAIN step ---
+    onnx_path = src_dir / "model.onnx"
+    if not onnx_path.exists():
+        raise FileNotFoundError(
+            f"model.onnx not found: {onnx_path.resolve()}\n"
+            f"Contents in model_artifact.path: {[p.name for p in src_dir.iterdir()]}"
+        )
+
+    # Optional, useful for inference/decoding/traceability
+    spec_path = src_dir / "model_spec.json"
+
+    files_to_upload = [onnx_path]
+    if spec_path.exists():
+        files_to_upload.append(spec_path)
+
+    # S3 client (MinIO/ODF/etc.)
     s3 = boto3.client(
         "s3",
         endpoint_url=endpoint,
@@ -54,21 +72,24 @@ def upload_model_to_s3_component(
         config=Config(s3={"addressing_style": "path"}),
     )
 
-    # Subida recursiva
+    # Upload
     files_uploaded = 0
-    for p in src_dir.rglob("*"):
-        if p.is_dir():
-            continue
-        rel = p.relative_to(src_dir).as_posix()
-        key = f"{prefix}/{rel}"
+    uploaded_keys = []
+
+    for p in files_to_upload:
+        key = f"{prefix}/{p.name}"
         s3.upload_file(str(p), bucket, key)
         files_uploaded += 1
+        uploaded_keys.append(key)
 
-    uri = f"s3://{bucket}/{prefix}"
+    # For ModelMesh deploy, you will use storage.path = "<s3_prefix>/model.onnx"
+    uri = f"s3://{bucket}/{prefix}/{onnx_path.name}"
     Path(model_s3_uri).write_text(uri)
 
     print("[UPLOAD] endpoint:", endpoint)
     print("[UPLOAD] bucket:", bucket)
+    print("[UPLOAD] region:", region)
     print("[UPLOAD] prefix:", prefix)
     print("[UPLOAD] files_uploaded:", files_uploaded)
+    print("[UPLOAD] uploaded_keys:", uploaded_keys)
     print("[UPLOAD] model_s3_uri:", uri)

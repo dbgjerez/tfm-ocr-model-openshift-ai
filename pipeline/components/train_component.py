@@ -13,6 +13,8 @@ from kfp.dsl import Dataset, Input, Model, Output
         "scikit-learn==1.5.2",
         "matplotlib==3.9.2",
         "seaborn==0.13.2",
+        "onnx==1.16.2",
+        "onnxruntime==1.19.2",  
     ],
 )
 def train_component(
@@ -231,23 +233,32 @@ def train_component(
 
     # Confusion matrix (último epoch)
     cm_path = save_confusion_matrix(y_true, y_pred, out_dir / "confusion_matrix.png")
-
     # ----------------------------
-    # Save model + metadata
+    # Save model + metadata (source-of-truth + serving artifact)
     # ----------------------------
     model_path = out_dir / "model.pt"
     torch.save(model.state_dict(), model_path)
 
-    # Guardamos un pequeño "spec" para reconstruir el modelo
+    # Spec para reconstruir el modelo (ya lo usas en validate)
     spec = {
         "arch": "SimpleCNN",
         "num_classes": int(num_classes),
         "input_shape": [1, 32, 32],
         "normalization": {"mean": [0.5], "std": [0.5]},
-        "label_to_char": label_to_char,  # útil para inferencia
+        "label_to_char": label_to_char,
         "char_to_label": char_to_label,
+        # Opcional: info útil para serving
+        "serving": {
+            "format": "onnx",
+            "input_name": "input",
+            "output_name": "logits",
+            "opset": 17,
+            "dynamic_batch": True,
+        },
     }
-    (out_dir / "model_spec.json").write_text(json.dumps(spec, indent=2))
+
+    spec_path = out_dir / "model_spec.json"
+    spec_path.write_text(json.dumps(spec, indent=2))
 
     metrics = {
         "val_acc": float(last_val_acc),
@@ -256,17 +267,61 @@ def train_component(
         "val_split": float(val_split),
         "lr": float(lr),
     }
-    (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
-    (out_dir / "history.json").write_text(json.dumps(history, indent=2))
+    metrics_path = out_dir / "metrics.json"
+    history_path = out_dir / "history.json"
+    metrics_path.write_text(json.dumps(metrics, indent=2))
+    history_path.write_text(json.dumps(history, indent=2))
 
-    # KFP: metadatos del artifact Model (opcional pero muy útil)
+    # ----------------------------
+    # Export ONNX (NO retraining)
+    #   - ModelMesh/OVMS no puede cargar un .pt (state_dict)
+    #   - Exportamos ONNX desde los pesos entrenados
+    # ----------------------------
+    onnx_path = out_dir / "model.onnx"
+
+    # Export en CPU para evitar dependencias/GPU en serving
+    model_cpu = SimpleCNN(num_classes=num_classes).to("cpu")
+    state_cpu = torch.load(model_path, map_location="cpu", weights_only=True)
+    model_cpu.load_state_dict(state_cpu)
+    model_cpu.eval()
+
+    dummy = torch.randn(1, 1, 32, 32, device="cpu")  # input_shape
+    torch.onnx.export(
+        model_cpu,
+        dummy,
+        str(onnx_path),
+        input_names=["input"],
+        output_names=["logits"],
+        opset_version=17,
+        do_constant_folding=True,
+        dynamic_axes={
+            "input": {0: "batch"},
+            "logits": {0: "batch"},
+        },
+    )
+
+    if not onnx_path.exists():
+        raise RuntimeError("ONNX export failed: model.onnx was not created")
+
+    # ----------------------------
+    # KFP artifact metadata
+    # ----------------------------
     model_artifact.metadata["framework"] = "pytorch"
     model_artifact.metadata["arch"] = "SimpleCNN"
     model_artifact.metadata["val_acc"] = float(last_val_acc)
     model_artifact.metadata["num_classes"] = int(num_classes)
+    model_artifact.metadata["exported_formats"] = ["pt_state_dict", "onnx"]
+    model_artifact.metadata["onnx_file"] = onnx_path.name
+    model_artifact.metadata["onnx_opset"] = 17
+    model_artifact.metadata["input_shape"] = [1, 32, 32]
 
+    # ----------------------------
+    # Logs
+    # ----------------------------
     print("[TRAIN] wrote:", model_path)
+    print("[TRAIN] wrote:", onnx_path)
     print("[TRAIN] wrote:", cm_path)
-    print("[TRAIN] wrote:", out_dir / "model_spec.json")
-    print("[TRAIN] wrote:", out_dir / "metrics.json")
+    print("[TRAIN] wrote:", spec_path)
+    print("[TRAIN] wrote:", metrics_path)
+    print("[TRAIN] wrote:", history_path)
     print("[TRAIN] Done.")

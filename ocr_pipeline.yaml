@@ -13,7 +13,7 @@
 #    s3_prefix: str [Default: 'models/ocr-rest/latest']
 #    s3_region: str [Default: 'us-east-1']
 #    service_account: str [Default: 'default']
-#    storage_secret_name: str [Default: 'ocr-s3-creds']
+#    storage_secret_name: str [Default: 'ocr-model-s3']
 components:
   comp-condition-1:
     dag:
@@ -468,9 +468,10 @@ deploymentSpec:
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'pandas==2.2.2'\
           \ 'pillow==10.4.0' 'torch==2.4.1' 'torchvision==0.19.1' 'scikit-learn==1.5.2'\
-          \ 'matplotlib==3.9.2' 'seaborn==0.13.2'  &&  python3 -m pip install --quiet\
-          \ --no-warn-script-location 'kfp==2.15.2' '--no-deps' 'typing-extensions>=3.7.4,<5;\
-          \ python_version<\"3.9\"' && \"$0\" \"$@\"\n"
+          \ 'matplotlib==3.9.2' 'seaborn==0.13.2' 'onnx==1.16.2' 'onnxruntime==1.19.2'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -577,28 +578,51 @@ deploymentSpec:
           \           \"val_acc\": float(val_acc),\n            }\n        )\n\n \
           \       print(f\"[Epoch {ep}] Train acc={tr_acc:.3f} | Val acc={val_acc:.3f}\"\
           )\n\n    # Confusion matrix (\xFAltimo epoch)\n    cm_path = save_confusion_matrix(y_true,\
-          \ y_pred, out_dir / \"confusion_matrix.png\")\n\n    # ----------------------------\n\
-          \    # Save model + metadata\n    # ----------------------------\n    model_path\
-          \ = out_dir / \"model.pt\"\n    torch.save(model.state_dict(), model_path)\n\
-          \n    # Guardamos un peque\xF1o \"spec\" para reconstruir el modelo\n  \
-          \  spec = {\n        \"arch\": \"SimpleCNN\",\n        \"num_classes\":\
-          \ int(num_classes),\n        \"input_shape\": [1, 32, 32],\n        \"normalization\"\
-          : {\"mean\": [0.5], \"std\": [0.5]},\n        \"label_to_char\": label_to_char,\
-          \  # \xFAtil para inferencia\n        \"char_to_label\": char_to_label,\n\
-          \    }\n    (out_dir / \"model_spec.json\").write_text(json.dumps(spec,\
+          \ y_pred, out_dir / \"confusion_matrix.png\")\n    # ----------------------------\n\
+          \    # Save model + metadata (source-of-truth + serving artifact)\n    #\
+          \ ----------------------------\n    model_path = out_dir / \"model.pt\"\n\
+          \    torch.save(model.state_dict(), model_path)\n\n    # Spec para reconstruir\
+          \ el modelo (ya lo usas en validate)\n    spec = {\n        \"arch\": \"\
+          SimpleCNN\",\n        \"num_classes\": int(num_classes),\n        \"input_shape\"\
+          : [1, 32, 32],\n        \"normalization\": {\"mean\": [0.5], \"std\": [0.5]},\n\
+          \        \"label_to_char\": label_to_char,\n        \"char_to_label\": char_to_label,\n\
+          \        # Opcional: info \xFAtil para serving\n        \"serving\": {\n\
+          \            \"format\": \"onnx\",\n            \"input_name\": \"input\"\
+          ,\n            \"output_name\": \"logits\",\n            \"opset\": 17,\n\
+          \            \"dynamic_batch\": True,\n        },\n    }\n\n    spec_path\
+          \ = out_dir / \"model_spec.json\"\n    spec_path.write_text(json.dumps(spec,\
           \ indent=2))\n\n    metrics = {\n        \"val_acc\": float(last_val_acc),\n\
           \        \"epochs\": int(epochs),\n        \"batch_size\": int(batch_size),\n\
           \        \"val_split\": float(val_split),\n        \"lr\": float(lr),\n\
-          \    }\n    (out_dir / \"metrics.json\").write_text(json.dumps(metrics,\
-          \ indent=2))\n    (out_dir / \"history.json\").write_text(json.dumps(history,\
-          \ indent=2))\n\n    # KFP: metadatos del artifact Model (opcional pero muy\
-          \ \xFAtil)\n    model_artifact.metadata[\"framework\"] = \"pytorch\"\n \
-          \   model_artifact.metadata[\"arch\"] = \"SimpleCNN\"\n    model_artifact.metadata[\"\
-          val_acc\"] = float(last_val_acc)\n    model_artifact.metadata[\"num_classes\"\
-          ] = int(num_classes)\n\n    print(\"[TRAIN] wrote:\", model_path)\n    print(\"\
-          [TRAIN] wrote:\", cm_path)\n    print(\"[TRAIN] wrote:\", out_dir / \"model_spec.json\"\
-          )\n    print(\"[TRAIN] wrote:\", out_dir / \"metrics.json\")\n    print(\"\
-          [TRAIN] Done.\")\n\n"
+          \    }\n    metrics_path = out_dir / \"metrics.json\"\n    history_path\
+          \ = out_dir / \"history.json\"\n    metrics_path.write_text(json.dumps(metrics,\
+          \ indent=2))\n    history_path.write_text(json.dumps(history, indent=2))\n\
+          \n    # ----------------------------\n    # Export ONNX (NO retraining)\n\
+          \    #   - ModelMesh/OVMS no puede cargar un .pt (state_dict)\n    #   -\
+          \ Exportamos ONNX desde los pesos entrenados\n    # ----------------------------\n\
+          \    onnx_path = out_dir / \"model.onnx\"\n\n    # Export en CPU para evitar\
+          \ dependencias/GPU en serving\n    model_cpu = SimpleCNN(num_classes=num_classes).to(\"\
+          cpu\")\n    state_cpu = torch.load(model_path, map_location=\"cpu\", weights_only=True)\n\
+          \    model_cpu.load_state_dict(state_cpu)\n    model_cpu.eval()\n\n    dummy\
+          \ = torch.randn(1, 1, 32, 32, device=\"cpu\")  # input_shape\n    torch.onnx.export(\n\
+          \        model_cpu,\n        dummy,\n        str(onnx_path),\n        input_names=[\"\
+          input\"],\n        output_names=[\"logits\"],\n        opset_version=17,\n\
+          \        do_constant_folding=True,\n        dynamic_axes={\n           \
+          \ \"input\": {0: \"batch\"},\n            \"logits\": {0: \"batch\"},\n\
+          \        },\n    )\n\n    if not onnx_path.exists():\n        raise RuntimeError(\"\
+          ONNX export failed: model.onnx was not created\")\n\n    # ----------------------------\n\
+          \    # KFP artifact metadata\n    # ----------------------------\n    model_artifact.metadata[\"\
+          framework\"] = \"pytorch\"\n    model_artifact.metadata[\"arch\"] = \"SimpleCNN\"\
+          \n    model_artifact.metadata[\"val_acc\"] = float(last_val_acc)\n    model_artifact.metadata[\"\
+          num_classes\"] = int(num_classes)\n    model_artifact.metadata[\"exported_formats\"\
+          ] = [\"pt_state_dict\", \"onnx\"]\n    model_artifact.metadata[\"onnx_file\"\
+          ] = onnx_path.name\n    model_artifact.metadata[\"onnx_opset\"] = 17\n \
+          \   model_artifact.metadata[\"input_shape\"] = [1, 32, 32]\n\n    # ----------------------------\n\
+          \    # Logs\n    # ----------------------------\n    print(\"[TRAIN] wrote:\"\
+          , model_path)\n    print(\"[TRAIN] wrote:\", onnx_path)\n    print(\"[TRAIN]\
+          \ wrote:\", cm_path)\n    print(\"[TRAIN] wrote:\", spec_path)\n    print(\"\
+          [TRAIN] wrote:\", metrics_path)\n    print(\"[TRAIN] wrote:\", history_path)\n\
+          \    print(\"[TRAIN] Done.\")\n\n"
         image: registry.access.redhat.com/ubi9/python-311
     exec-upload-model-to-s3-component:
       container:
@@ -629,31 +653,42 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef upload_model_to_s3_component(\n    model_artifact: Input[Model],\n\
           \    s3_prefix: str,\n    model_s3_uri: OutputPath(str),\n):\n    \"\"\"\
-          \n    Sube el contenido de model_artifact.path a:\n      s3://<AWS_S3_BUCKET>/<s3_prefix>/\n\
-          \n    Requiere env vars (en el contenedor del step):\n      - AWS_S3_ENDPOINT\
-          \  (ej: https://minio-api-... o https://s3.openshift-storage.svc)\n    \
-          \  - AWS_S3_BUCKET\n      - AWS_DEFAULT_REGION (opcional)\n    Y credenciales\
-          \ (habitualmente ya est\xE1n en el pod v\xEDa Secret/SA):\n      - AWS_ACCESS_KEY_ID\n\
-          \      - AWS_SECRET_ACCESS_KEY\n    \"\"\"\n    import os\n    from pathlib\
-          \ import Path\n\n    import boto3\n    from botocore.config import Config\n\
-          \n    endpoint = os.environ.get(\"AWS_S3_ENDPOINT\")\n    bucket = os.environ.get(\"\
-          AWS_S3_BUCKET\")\n    region = os.environ.get(\"AWS_DEFAULT_REGION\", \"\
-          us-east-1\")\n\n    if not endpoint:\n        raise RuntimeError(\"Missing\
-          \ env var AWS_S3_ENDPOINT\")\n    if not bucket:\n        raise RuntimeError(\"\
-          Missing env var AWS_S3_BUCKET\")\n\n    src_dir = Path(model_artifact.path)\n\
-          \    if not src_dir.exists():\n        raise FileNotFoundError(f\"model_artifact.path\
-          \ not found: {src_dir}\")\n\n    prefix = s3_prefix.strip(\"/\")\n\n   \
-          \ # Cliente S3 compatible (MinIO/ODF/etc.)\n    s3 = boto3.client(\n   \
-          \     \"s3\",\n        endpoint_url=endpoint,\n        region_name=region,\n\
-          \        config=Config(s3={\"addressing_style\": \"path\"}),\n    )\n\n\
-          \    # Subida recursiva\n    files_uploaded = 0\n    for p in src_dir.rglob(\"\
-          *\"):\n        if p.is_dir():\n            continue\n        rel = p.relative_to(src_dir).as_posix()\n\
-          \        key = f\"{prefix}/{rel}\"\n        s3.upload_file(str(p), bucket,\
-          \ key)\n        files_uploaded += 1\n\n    uri = f\"s3://{bucket}/{prefix}\"\
-          \n    Path(model_s3_uri).write_text(uri)\n\n    print(\"[UPLOAD] endpoint:\"\
-          , endpoint)\n    print(\"[UPLOAD] bucket:\", bucket)\n    print(\"[UPLOAD]\
+          \n    Upload for ModelMesh/OVMS serving.\n\n    It uploads ONLY the serving\
+          \ artifacts (by default: model.onnx, and optionally\n    model_spec.json),\
+          \ and writes the exact ONNX URI into model_s3_uri.\n\n    Requires env vars\
+          \ in the step container:\n      - AWS_S3_ENDPOINT (recommended: internal\
+          \ svc URL, e.g. http://minio-service.<ns>.svc:9000)\n      - AWS_S3_BUCKET\n\
+          \      - AWS_DEFAULT_REGION (recommended, e.g. us-east-1)\n      - AWS_ACCESS_KEY_ID\
+          \ / AWS_SECRET_ACCESS_KEY\n\n    Output:\n      - model_s3_uri: s3://<bucket>/<s3_prefix>/model.onnx\n\
+          \    \"\"\"\n    import os\n    from pathlib import Path\n\n    import boto3\n\
+          \    from botocore.config import Config\n\n    endpoint = os.environ.get(\"\
+          AWS_S3_ENDPOINT\")\n    bucket = os.environ.get(\"AWS_S3_BUCKET\")\n   \
+          \ region = os.environ.get(\"AWS_DEFAULT_REGION\", \"us-east-1\")\n\n   \
+          \ if not endpoint:\n        raise RuntimeError(\"Missing env var AWS_S3_ENDPOINT\"\
+          )\n    if not bucket:\n        raise RuntimeError(\"Missing env var AWS_S3_BUCKET\"\
+          )\n\n    src_dir = Path(model_artifact.path)\n    if not src_dir.exists():\n\
+          \        raise FileNotFoundError(f\"model_artifact.path not found: {src_dir}\"\
+          )\n\n    prefix = s3_prefix.strip(\"/\")\n\n    # --- Serving files we expect\
+          \ from TRAIN step ---\n    onnx_path = src_dir / \"model.onnx\"\n    if\
+          \ not onnx_path.exists():\n        raise FileNotFoundError(\n          \
+          \  f\"model.onnx not found: {onnx_path.resolve()}\\n\"\n            f\"\
+          Contents in model_artifact.path: {[p.name for p in src_dir.iterdir()]}\"\
+          \n        )\n\n    # Optional, useful for inference/decoding/traceability\n\
+          \    spec_path = src_dir / \"model_spec.json\"\n\n    files_to_upload =\
+          \ [onnx_path]\n    if spec_path.exists():\n        files_to_upload.append(spec_path)\n\
+          \n    # S3 client (MinIO/ODF/etc.)\n    s3 = boto3.client(\n        \"s3\"\
+          ,\n        endpoint_url=endpoint,\n        region_name=region,\n       \
+          \ config=Config(s3={\"addressing_style\": \"path\"}),\n    )\n\n    # Upload\n\
+          \    files_uploaded = 0\n    uploaded_keys = []\n\n    for p in files_to_upload:\n\
+          \        key = f\"{prefix}/{p.name}\"\n        s3.upload_file(str(p), bucket,\
+          \ key)\n        files_uploaded += 1\n        uploaded_keys.append(key)\n\
+          \n    # For ModelMesh deploy, you will use storage.path = \"<s3_prefix>/model.onnx\"\
+          \n    uri = f\"s3://{bucket}/{prefix}/{onnx_path.name}\"\n    Path(model_s3_uri).write_text(uri)\n\
+          \n    print(\"[UPLOAD] endpoint:\", endpoint)\n    print(\"[UPLOAD] bucket:\"\
+          , bucket)\n    print(\"[UPLOAD] region:\", region)\n    print(\"[UPLOAD]\
           \ prefix:\", prefix)\n    print(\"[UPLOAD] files_uploaded:\", files_uploaded)\n\
-          \    print(\"[UPLOAD] model_s3_uri:\", uri)\n\n"
+          \    print(\"[UPLOAD] uploaded_keys:\", uploaded_keys)\n    print(\"[UPLOAD]\
+          \ model_s3_uri:\", uri)\n\n"
         image: registry.access.redhat.com/ubi9/python-311
     exec-validate-component:
       container:
@@ -966,8 +1001,29 @@ root:
         isOptional: true
         parameterType: STRING
       storage_secret_name:
-        defaultValue: ocr-s3-creds
+        defaultValue: ocr-model-s3
         isOptional: true
         parameterType: STRING
 schemaVersion: 2.1.0
 sdkVersion: kfp-2.15.2
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-upload-model-to-s3-component:
+          secretAsEnv:
+          - keyToEnv:
+            - envVar: AWS_ACCESS_KEY_ID
+              secretKey: AWS_ACCESS_KEY_ID
+            - envVar: AWS_SECRET_ACCESS_KEY
+              secretKey: AWS_SECRET_ACCESS_KEY
+            - envVar: AWS_S3_ENDPOINT
+              secretKey: AWS_S3_ENDPOINT
+            - envVar: AWS_S3_BUCKET
+              secretKey: AWS_S3_BUCKET
+            optional: false
+            secretName: ocr-model-s3
+            secretNameParameter:
+              runtimeValue:
+                constant: ocr-model-s3
